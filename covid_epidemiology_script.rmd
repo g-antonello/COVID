@@ -1,0 +1,1268 @@
+---
+title: "COVID analysis"
+author: "Giacomo Antonello"
+date: "08/03/2021"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+
+# Load libraries and theme set
+
+```{r, message=FALSE}
+
+#library(magrittr)
+library(ggpubr)
+theme_set(theme_light())
+source("../personal_R_functions/my_personal_functions.R")
+
+# functions
+# inflect: finds minima and maxima of a numeric vector, and return positions of minima and maxima in two separate vectors inside a list
+inflect <- function(x, threshold = 1){
+  up   <- sapply(1:threshold, function(n) c(x[-(seq(n))], rep(NA, n)))
+  down <-  sapply(-1:-threshold, function(n) c(rep(NA,abs(n)), x[-seq(length(x), length(x) - abs(n) + 1)]))
+  a    <- cbind(x,up,down)
+  list(minima = which(apply(a, 1, min) == a[,1]), maxima = which(apply(a, 1, max) == a[,1]))
+}
+
+library(tidyverse)
+
+```
+# Download and tidy up epidemiology data
+
+```{r, message=FALSE, warning=FALSE}
+
+# downoad Our World In Data newest dataset
+tryCatch(expr = source("data/epidemiology/world/download_OWID_dataset.R"), 
+         error = function(err) download.file(url = "https://covid.ourworldindata.org/data/owid-covid-data.csv", destfile = paste0("data/epidemiology/world/OWID_huge_table_latest.", Sys.Date(), ".csv")))
+         
+# download italy regional and whole data
+source("data/epidemiology/italy/download newest data.R")
+# wrangle italy data  
+source("data/epidemiology/italy/italy_whole/wrangle italy data.R")
+
+latest_date_italy.country_dataset <- read.csv("data/epidemiology/italy/italy_whole/covid_ITALY_data_clean.csv") %>% 
+  rename(giorno_da_inizio_pandemia = X) %>% 
+  .$data %>% as.Date() %>% sort() %>% unique() %>% tail(1)
+
+# wrangle region data
+source("data/epidemiology/italy/regions/wrangle region data.R")
+
+latest_date_italy.regions_dataset <- read.csv("data/epidemiology/italy/regions/covid_REGIONS_data_clean.csv", row.names = 1) %>% 
+  mutate(date = as.Date(date)) %>% 
+  .$date %>% sort() %>% unique() %>% tail(1)
+
+```
+
+# International - epidemiology
+
+```{r covid international, message=FALSE, warning=FALSE}
+covid_epidemiology_international <- readr::read_csv(file = list.files(path = "data/epidemiology/world/", 
+                                                                 pattern = ".csv$", full.names = TRUE)) %>% 
+   mutate(date_tmp = as.character(date)) %>% 
+  mutate(date = as.Date(date)) %>% 
+  separate(col = "date_tmp", into = c("year", "month", "day"), sep = "-", remove = FALSE)
+
+
+```
+## top 20 epidemiologically active countries
+
+```{r}
+
+latest_date <- max(covid_epidemiology_international$date)
+
+covid_epidemiology_international %>% 
+  filter(date == max(date) & !is.na(continent)) %>% # get only latest date, and the continents in the "location" column need to be removed. this is easy, we can simply remove rows where "location" is NA.
+  arrange(-new_cases_per_million) %>% 
+  head(50) %>% 
+  #filter(iso_code =="ITA") %>% 
+  select(date, new_cases_per_million, location, continent) %>% 
+  ggplot(aes(y = reorder(location, new_cases_per_million), x = new_cases_per_million, fill = continent)) + 
+  geom_bar(stat = "identity") + 
+  theme_light()+
+  ggtitle("Tot weekly Cases per million")+
+    labs(subtitle = paste("Latest date:", latest_date))+
+  xlab("Weekly cases per million") +
+  ylab("Country")+
+  scale_fill_manual(values = ggsci::pal_jco()(6))
+
+
+```
+
+## top 20 cases per million in latest date (Latest)
+
+```{r, fig.height=6, fig.width=8}
+
+latest_date <- max(covid_epidemiology_international$date)
+
+tmp <- covid_epidemiology_international %>% 
+  filter(date == max(date) & !is.na(continent)) %>% # get only latest date, and the continents in the "location" column need to be removed. this is easy, we can simply remove rows where "location" is NA.
+  arrange(-total_cases_per_million) %>% 
+  head(50) %>% 
+  ggplot(aes(y = reorder(location, total_cases_per_million), x = total_cases_per_million, fill = continent)) + 
+  geom_bar(stat = "identity") + 
+  theme_light()+
+  ggtitle("Tot Cases per million")+
+    labs(subtitle = paste("Latest date:", latest_date))+
+  xlab("Tot Cases per million") +
+  ylab("Country")+
+    scale_fill_manual("Continent", values = ggsci::pal_jco()(6))
+
+tmp
+
+```
+
+## top 20 deaths per million (Latest)
+
+```{r, fig.height=6, fig.width=8}
+latest_date <- max(covid_epidemiology_international$date)
+
+covid_epidemiology_international %>% 
+  filter(date == max(date) & !is.na(continent)) %>% # get only latest date, and the continents in the "location" column need to be removed. this is easy, we can simply remove rows where "location" is NA.
+  arrange(-total_deaths_per_million) %>% 
+  head(50) %>% 
+  ggplot(aes(y = reorder(location, total_deaths_per_million), x = total_deaths_per_million, fill = continent)) + 
+  geom_bar(stat = "identity") + 
+  theme_light()+
+  ggtitle("Deaths per million")+
+    labs(subtitle = paste("Latest date:", latest_date))+
+  xlab("Deaths per million") +
+  ylab("Country")+
+    scale_fill_manual("Continent", values = ggsci::pal_jco()(6))
+```
+
+
+
+# Importance of day of week in estimating values
+
+```{r}
+ggpubr::ggarrange(ggplot(covid_data_italy_whole, aes(data, tamponi_nuovi, colour = giorno_sett))+ geom_line(),
+                  ggplot(covid_data_italy_whole, aes(data, nuovi_positivi, colour = giorno_sett))+ geom_line(),
+                  common.legend = TRUE, 
+                  nrow = 2, ncol = 1)
+```
+
+## International table
+
+```{r}
+latest_date_owid_dataset <- sort(unique(covid_epidemiology_international$date), decreasing = TRUE)[1]
+
+covid_epidemiology_international %>% filter(date == latest_date_owid_dataset) %>% 
+  filter(!is.na(continent)) %>% 
+  select(location,new_cases, total_cases, new_deaths, total_deaths,  icu_patients, new_cases_per_million, total_cases_per_million, new_deaths_per_million, total_deaths_per_million, icu_patients_per_million, continent) %>%
+  reactable::reactable(filterable = TRUE,defaultSorted = "total_cases", defaultSortOrder = "desc")
+  
+```
+
+## cases per million per date in Italy, Germany, Uk, Israel and France
+
+```{r}
+# weekly 
+plotly::ggplotly(filter(covid_epidemiology_international, location %in% c("Italy", "Israel", "Germany", "United Kingdom", "France")) %>% 
+  mutate(week = as.Date(cut(date, "weeks"))) %>% 
+    group_by(location, week) %>% 
+    summarise(new_cases_per_million = sum(new_cases_per_million)) %>% 
+  ggplot(aes(x = week, y = new_cases_per_million, key = week))+
+  geom_line(aes(group = 1))+
+    facet_wrap(~location)+
+    theme(axis.text.x = element_text(angle = 90))
+)
+
+# daily
+
+plotly::ggplotly(filter(covid_epidemiology_international, location %in% c("Italy", "Israel", "Germany", "United Kingdom", "France")) %>% 
+  ggplot(aes(x = date, y = new_cases_per_million, key = date))+
+  geom_line(aes(group = 1))+
+    facet_wrap(~location)+
+    theme(axis.text.x = element_text(angle = 90))
+)
+
+```
+
+
+## ICU per million per date in Italy, Germany, Uk, Israel and France
+
+```{r}
+
+plotly::ggplotly(filter(covid_epidemiology_international, location %in% c("Italy", "Israel", "Germany", "United Kingdom", "France")) %>% 
+  mutate(week = as.Date(cut(date, "weeks"))) %>%
+  ggplot(aes(x = week, y = icu_patients_per_million, key = week))+
+  geom_line(aes(group = 1))+
+    facet_wrap(~location)
+)
+
+```
+
+
+## New Deaths per million per date in Italy, Germany, Uk, Israel and France
+
+```{r}
+
+plotly::ggplotly(filter(covid_epidemiology_international, location %in% c("Italy", "Israel", "Germany", "United Kingdom", "France")) %>% 
+  mutate(week = as.Date(cut(date, "weeks"))) %>%
+    group_by(location, week) %>% 
+    summarise(new_deaths_per_million = sum(new_deaths_per_million)) %>% 
+  ggplot(aes(x = week, y = new_deaths_per_million, key = week))+
+  geom_line(aes(group = 1))+
+    facet_wrap(~location)
+)
+
+```
+
+
+# Effect of vaccines on ratio new deaths / new cases
+
+```{r}
+
+dir.create("figures/to_La7/")
+
+plot1 <- filter(covid_epidemiology_international, location %in% c("Italy", "Israel", "Germany", "United Kingdom", "France", "United States", "Spain", "Portugal", "Russia")) %>% 
+  mutate(month = cut(date, "months")) %>% 
+  ggplot(
+    aes(x = total_vaccinations_per_hundred, 
+        y = log(new_deaths_per_million/new_cases_per_million), 
+        color = month)
+    )+
+  geom_point()+
+    xlab("Dosi vaccinali sulla popolazione(%)")+
+    ylab(latex2exp::TeX("Log \\frac{Nuovi morti}{Nuovi Positivi}"))+
+  facet_wrap(~location)+ 
+  scale_color_viridis_d()
+
+plotly::ggplotly(plot1) %>% 
+  htmlwidgets::saveWidget(file = "figures/to_La7/efficacy_vaccines1.html")
+
+open.plot.directory("figures/to_La7/efficacy_vaccines1.html")
+latest_date <- tail(covid_epidemiology_international$date)[5]
+ 
+best_vaccinated_countries <- covid_epidemiology_international %>% 
+  filter(date == max(date) & !is.na(continent)) %>% # get only latest date, and the continents in the "location" column need to be removed. this is easy, we can simply remove rows where "location" is NA.
+  arrange(-total_vaccinations_per_hundred) %>% 
+  head(30) %>% 
+  ggplot(aes(y = reorder(location, total_vaccinations_per_hundred), x = total_vaccinations_per_hundred, fill = continent)) + 
+  geom_bar(stat = "identity") + 
+  theme_light()+
+  ggtitle("Best countries at vaccinating")+
+    labs(subtitle = paste("Latest date:", latest_date))+
+  xlab("Tot vaccine shots %") +
+  ylab("Country")+
+    scale_fill_manual("Continent", values = ggsci::pal_jco()(6))
+
+plotly::ggplotly(best_vaccinated_countries) %>% htmlwidgets::saveWidget(file = "figures/to_La7/best_vaccinated_countries.html")
+
+open.plot.directory("figures/to_La7/best_vaccinated_countries.html")
+
+```
+
+# Italia - epidemiologia giornaliera
+
+```{r}
+italy_covid <- read.csv("data/epidemiology/italy/italy_whole/covid_ITALY_data_clean.csv", row.names = 1) %>% 
+  mutate(data = as.Date(data))
+
+
+plotly::ggplotly(
+ggplot()+
+  geom_point(data = italy_covid, mapping = aes(x = data, y = nuovi_positivi, key = giorno_settimana))+
+  geom_point(data = italy_covid %>%  tail(14), mapping =  aes(x = as.Date(data), y = nuovi_positivi, key = giorno_settimana, color = factor(n_settimana)))+
+  ggtitle("Nuovi positivi")
+)
+
+plotly::ggplotly(
+ggplot()+
+  geom_point(data = italy_covid, mapping = aes(x = data, y = nuovi_positivi, key = giorno_settimana), color = "lightgray")+ 
+  geom_point(data = filter(italy_covid, between(tasso_tamponi_pos_percent, 12, 25)), mapping = aes(x = data, y = nuovi_positivi, key = giorno_settimana, color = tasso_tamponi_pos_percent))+ 
+  scale_color_viridis_c()+
+  ggtitle("Tasso tamponi positivi")
+)
+
+plotly::ggplotly(
+ggplot(italy_covid, aes(x = data, y = terapia_intensiva))+
+  geom_point()+ 
+  ggtitle("Terapie intensive")+
+  gghighlight::gghighlight(terapia_intensiva < 500)+
+  labs(caption = "Soglia evidenziazione: 500 pazienti")
+)
+
+theme_set(theme_light())
+
+sort(colnames(italy_covid))
+
+```
+
+## nuovi casi e nuove terapie intensive
+
+```{r}
+
+fattore_conversione <- 150
+
+latest_terapia_value <- filter(italy_covid, data == sort(italy_covid$data, decreasing = TRUE)[1]) %>% .$terapia_intensiva
+latest_tot_cases_value <- filter(italy_covid, data == sort(italy_covid$data, decreasing = TRUE)[1]) %>% .$totale_positivi_attualmente
+
+cool_plot_italy_per_day <- italy_covid %>% 
+  mutate(terapia_intensiva = fattore_conversione*terapia_intensiva) %>% 
+pivot_longer( cols = c("terapia_intensiva", "totale_positivi_attualmente"), names_to = "variables", values_to = "values") %>% 
+  ggplot(aes(x = as.Date(data), y = values, color = variables))+
+  geom_point()+ 
+  scale_color_discrete(name = "Variable", labels = c("Terapia Intensiva", "Positivi Attualmente") , type = ggsci::pal_jco()(2))+
+  scale_y_continuous(
+    # Features of the first axis
+    name = "Totale positivi attualmente",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis( ~ . / fattore_conversione, name = "Terapia intensiva attualmente")
+  ) + 
+  theme(axis.text.y.right = element_text(colour = ggsci::pal_jco()(2)[1]),
+        axis.text.y.left = element_text(colour = ggsci::pal_jco()(2)[2]),
+        axis.title.y.right = element_text(colour = ggsci::pal_jco()(2)[1]),
+        axis.title.y.left = element_text(colour = ggsci::pal_jco()(2)[2]))+
+  geom_hline(yintercept = latest_tot_cases_value, color = ggsci::pal_jco()(2)[2])+
+  geom_hline(yintercept = latest_terapia_value*fattore_conversione, color = ggsci::pal_jco()(2)[1])+
+  ggrepel::geom_label_repel(data = filter(italy_covid, data == sort(italy_covid$data, decreasing = TRUE)[1]),
+            mapping = aes(x = as.Date(data), y = terapia_intensiva*fattore_conversione, label = terapia_intensiva), color = ggsci::pal_jco()(2)[1])+
+  ggrepel::geom_label_repel(data = filter(italy_covid, data == sort(italy_covid$data, decreasing = TRUE)[1]),
+            mapping = aes(x = as.Date(data), y = totale_positivi_attualmente, label = totale_positivi_attualmente), color = ggsci::pal_jco()(2)[2])+ 
+  xlab("Data")
+
+
+cool_plot_italy_per_day
+
+```
+
+
+# Italia - epidemiologia settimanale
+
+```{r italian data load and wrangle, warning=FALSE}
+
+# load data
+italy_covid <- read.csv("data/epidemiology/italy/italy_whole/covid_ITALY_data_clean.csv", row.names = 1) %>% 
+  mutate(data = as.Date(data))
+
+
+italy_covid_weekly <- italy_covid %>% group_by(settimana) %>% 
+  summarise(nuovi_casi_sett = sum(nuovi_positivi),
+            nuove_morti_sett = sum(nuovi_deceduti),
+            casi_testati_sett = sum(casi_testati),
+            totale_casi_sett = sum(totale_positivi_attualmente),
+            totale_ospedalizzati_sett = sum(totale_ospedalizzati),
+            totale_ter_intens_sett = sum(terapia_intensiva),
+            # come sopra, ma per milione di abitanti
+            nuovi_casi_sett_permillion = sum(nuovi_positivi)/60,
+            #nuove_ter_intens_sett_permillion = nuove_ter_intens_sett/60,
+            nuove_morti_sett_permillion = sum(nuovi_deceduti)/60,
+            casi_testati_sett_permillion = sum(casi_testati)/60,
+            totale_casi_sett_permillion = sum(totale_positivi_attualmente)/60,
+            totale_ospedalizzati_sett_permillion = sum(totale_ospedalizzati)/60,
+            totale_ter_intens_sett_permillion = sum(terapia_intensiva)/60,
+            ) %>% 
+  ungroup() %>% 
+  distinct() %>% 
+  mutate(settimana = as.Date(settimana),
+         stagione = date_to_Season(settimana),
+         nuove_ter_intens_sett = c(0,diff(totale_ter_intens_sett)),
+         nuove_ter_intens_sett_permillion = nuove_ter_intens_sett/60)
+
+```
+
+## Plot A: Casi settimanali Nuovi e Totali
+
+```{r, fig.height=4, fig.width=6}
+
+plotA <- ggplot() +
+  geom_point(data = italy_covid_weekly,
+             mapping = aes(x = settimana, y = nuovi_casi_sett_permillion)) +
+  geom_line(
+    data = italy_covid_weekly,
+    mapping = aes(x = settimana, y = nuovi_casi_sett_permillion, group = 1)
+  ) +
+  geom_point(
+    data = italy_covid_weekly,
+    mapping = aes(x = settimana, y = totale_casi_sett_permillion / 15),
+    color = "red"
+  ) +
+  geom_line(
+    data = italy_covid_weekly,
+    mapping = aes(x = settimana, y = totale_casi_sett_permillion / 15, group = 1),
+    color = "red"
+  ) +
+  xlab("Settimana") +
+  scale_y_continuous(
+    # Features of the first axis
+    name = "Nuovi positivi settimanali (per milione)",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis( ~ . * 15, name = "Attualmente positivi (per milione)")
+  ) +
+  theme(
+    axis.title.y = element_text(color = "black"),
+    axis.title.y.right = element_text(color = "red"),
+    axis.text.y.right = element_text(colour = "red"),
+  )
+
+
+plotA
+
+
+```
+
+## PlotB: Ratio (morti nuove)/(casi nuovi)
+
+Importane aggiungere informazioni sulla stagione, perché si muore meno in stagioni con sole
+
+```{r, fig.height=4, fig.width=6}
+ 
+plotB <- ggplot(italy_covid_weekly, aes(x = settimana, y = nuove_morti_sett_permillion/nuovi_casi_sett_permillion, colour = stagione))+ 
+  geom_point()+
+  geom_line(aes(group=1))+
+  ylab(latex2exp::TeX("\\frac{Morti nuovi}{Casi Nuovi}"))+
+  scale_color_discrete(name = "Stagione", type = c("#43d948","#f1f12c","#ae4e23","#7aa9ee"))
+  
+
+plotB
+```
+## PlotC: ratio (totale positivi)/(totale ICU)
+
+```{r}
+
+plotC <- ggplot(italy_covid_weekly, aes(x = settimana, y = totale_ter_intens_sett/totale_casi_sett, colour = stagione))+ 
+  geom_point()+
+  geom_line(aes(group=1))+
+  ylab(latex2exp::TeX("\\frac{Rianimazione Totali}{Casi Totali}"))+
+  scale_color_discrete(name = "Stagione", type = c("#43d948","#f1f12c","#ae4e23","#7aa9ee"))
+  
+
+plotC
+
+```
+
+## PlotD: x = data, y = Nuovi Casi, y2 = nuove ICU cases; y2 = new_ICU
+
+```{r}
+
+plotD <- ggplot() +
+  geom_point(data = italy_covid_weekly, mapping = aes(x = settimana, y = nuovi_casi_sett_permillion))+ 
+  geom_line(data = italy_covid_weekly, mapping = aes(x = settimana, y = nuovi_casi_sett_permillion, group = 1)) +
+  geom_point(data = italy_covid_weekly, mapping = aes(x = settimana, y = nuove_ter_intens_sett_permillion*30), colour = "green")+ 
+  geom_line(data = italy_covid_weekly, mapping = aes(x = settimana, y = nuove_ter_intens_sett_permillion*30, group = 1), colour = "green")+
+  scale_y_continuous(
+    # Features of the first axis
+    name = "Nuovi positivi settimanali (per milione)",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis( ~ ./30, name = "Ingressi Rianimazione settimanali (per milione)")
+  ) +
+  theme(
+    axis.title.y = element_text(color = "black"),
+    axis.title.y.right = element_text(color = "green"),
+    axis.text.y.right = element_text(colour = "green")
+  )
+
+
+plotD
+
+```
+
+## PlotE: x =  data; y = Totale Casi; y2 = Totale Rianimazione
+
+```{r}
+
+plotE <- ggplot() +
+  geom_point(data = italy_covid_weekly, mapping = aes(x = settimana, y = totale_casi_sett_permillion))+ 
+  geom_line(data = italy_covid_weekly, mapping = aes(x = settimana, y = totale_casi_sett_permillion, group = 1)) +
+  geom_point(data = italy_covid_weekly, mapping = aes(x = settimana, y = totale_ter_intens_sett_permillion*300), colour = "green")+ 
+  geom_line(data = italy_covid_weekly, mapping = aes(x = settimana, y = totale_ter_intens_sett_permillion*300, group = 1), colour = "green")+
+  scale_y_continuous(
+    # Features of the first axis
+    name = "Totale positivi settimanali (per milione)",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis( ~ . / 300, name = "Totale Rianimazione settimanale (per milione)")
+  ) +
+  theme(
+    axis.title.y = element_text(color = "black"),
+    axis.title.y.right = element_text(color = "green"),
+    axis.text.y.right = element_text(colour = "green")
+  )
+
+plotE
+```
+
+## PlotF: Tamponi al giorno e tasso positività
+
+Non vedo grosse differenze nei tamponi processati, tranne forse la tendenza per domenica e lunedì di farne di meno. questo non è una novità, ma fa piuttosto bene ricordare che i bassi numeri di contagiati delle domeniche e lunedì dipendono da questo.
+
+```{r}
+plotF <- italy_covid %>% 
+  mutate(data = as.Date(data),
+         giorno_settimana = factor(giorno_settimana, levels = c("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
+                                   )
+         )%>% 
+ggplot(aes(x = data, y = tamponi_nuovi, colour = giorno_settimana)) + 
+  geom_point()+
+  geom_line()+ 
+  ylab("Nuovi Tamponi")+ 
+  xlab("Data")+
+  labs(color = "Giorno della settimana")
+  
+
+plotG <- italy_covid %>% 
+  mutate(data = as.Date(data),
+         giorno_settimana = factor(giorno_settimana, levels = c("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")),
+         positivi_su_tamponi = nuovi_positivi/tamponi_nuovi
+         )%>% 
+  filter(positivi_su_tamponi > 0) %>% 
+ggplot(aes(x = data, y = positivi_su_tamponi*100, colour = giorno_settimana)) + 
+  geom_point()+
+  geom_line()+ 
+  ylab("Tasso positività (%)")+ 
+  xlab("Data")+
+  labs(color = "Giorno della settimana")
+
+
+
+
+ggarrange(plotF, plotG, nrow = 2, ncol = 1, common.legend = TRUE)
+```
+
+## Arrange and save on desktop plots A,D,E,F
+
+```{r}
+
+library(ggpubr)
+
+plot_panel <- ggarrange(plotA, plotD, plotE, plotF, nrow = 2, ncol = 2)
+
+ggsave(filename = paste0("figures/00_overallEpidemiology-", Sys.Date(), ".pdf"), 
+       plot = plot_panel,
+       height = 10,
+       width = 12)
+
+plot_panel
+
+open.plot.directory(paste0("figures/00_overallEpidemiology-", Sys.Date(), ".pdf"))
+
+```
+
+# Vaccinations N vs Rt in different countries during specific waves
+
+
+This is to try and prove that vaccines have reduced the Rt in countries with comparable epidemiological background. so i will take a few european countries and plot y = Rt, x = n° vaccinations over total population, using the OWID datasets 
+
+```{r}
+rt_vs_vaccinations_plot <- covid_epidemiology_international %>% 
+  filter(date > as.Date("2021-12-01")) %>% 
+  filter(location %in% c("Italy", "Israel", "Germany", "United Kingdom", "France", "Spain", "Portugal", "Estonia")) %>% 
+  ggplot(aes(x = total_vaccinations_per_hundred, y = reproduction_rate, colour = location, group = location, key = date)) +
+  geom_line()
+
+plotly::ggplotly(rt_vs_vaccinations_plot)
+```
+The rate of vaccination is a proxy of date, since the countries have vaccinated generally with similar rates. this complicates the plot, because Rt moves with the wave, as do vaccinations, but this doesn't mean that avvinating above 200% means lowering Rt, but rather that the wave is fading. I need to find another way to see this. i might look into countries divided into quantiles of vaccinations' converage, around the beginning of omicron wave, and see if the Rt increase is higher or lower in those countries.
+
+```{r}
+
+rt_vs_vaccinations_plot2 <- covid_epidemiology_international %>% 
+  filter(date > as.Date("2021-12-01") & date < as.Date("2021-12-31")) %>% 
+  filter(location %in% c("Italy", "Israel", "Germany", "United Kingdom", "France", "Spain", "Portugal", "Estonia")) %>% 
+  group_by(location) %>% 
+  mutate(rt_change = c(0, diff(reproduction_rate))) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = total_vaccinations_per_hundred, y = rt_change, colour = location, group = location, key = date)) +
+  geom_line()+ 
+  geom_smooth()
+
+
+plotly::ggplotly(rt_vs_vaccinations_plot2)
+```
+Actually, this is not taking quantiles into account, but meh. still i can't see trends...
+
+
+# Regioni Italiane - epidemiologia
+```{r}
+italy_regions_epidemiology <- read.csv("data/epidemiology/italy/regions/covid_REGIONS_data_clean.csv", row.names = 1) %>% 
+  mutate(date = as.Date(date))
+
+colnames(italy_regions_epidemiology)
+```
+
+## Casi per 1000 abitanti in ogni regione (ultima data)
+
+```{r}
+
+# 1. format region names to please the mapIT package, understanding that south tyrol and trentino are one single region, while covid epidemiology data disagrees
+italy_regions_epidemiology$region[italy_regions_epidemiology$region == "Friuli Venezia Giulia"] <- "Friuli-Venezia Giulia"
+
+tmp <- italy_regions_epidemiology %>% 
+  select(region, positives_tot, hospitalized_with_symptoms, date, region_inhabitants)
+
+tmp$region[tmp$region == "P.A. Trento"] <- "Trentino-Alto Adige"
+tmp$region[tmp$region == "P.A. Bolzano"] <- "Trentino-Alto Adige"
+
+# now find a way to summarise trentino + alto adige into Trentino-Alto Adige
+tmp2 <- tmp %>% group_by(region, date) %>% 
+  summarise_each(list(sum)) %>% 
+  mutate(positives_tot_per1000 = positives_tot/region_inhabitants*1000,
+         hospitalized_with_symptoms_per1000 = hospitalized_with_symptoms/region_inhabitants*1000)
+
+# get only latest date of the dataset for plotting
+latest_date_in_dataset <- sort(tmp2$date, decreasing = TRUE)[1]
+tmp2_plot <- filter(tmp2, date == latest_date_in_dataset)
+
+# now the actual region plot, to the latest date, in the future, a gif could be cool, or even better a selectable bar for date, but that would require a shiny app i think
+
+#devtools::install_github("ropensci/rnaturalearthhires")
+library(rnaturalearth)
+
+italy_map <- ne_states(country = "italy", returnclass = "sf") %>% 
+  group_by(region) %>% 
+  summarise() %>% 
+  sf::st_cast("MULTIPOLYGON") # this line is useful to make plotly plots
+
+
+italy_map$region[italy_map$region == "Sicily"] <- "Sicilia"
+italy_map$region[italy_map$region == "Apulia"] <- "Puglia"
+
+
+plotPos <- right_join(italy_map,tmp2_plot, by = "region") %>% 
+  ggplot()+
+  geom_sf(aes(fill = positives_tot_per1000, key = region))+ 
+  scale_fill_distiller(name = "Positivi per 1000 abitanti", palette = "Spectral")+
+  theme(legend.position = "top")+ 
+  labs(caption = paste("Data di riferimento:", latest_date_in_dataset))
+
+plotHosp <- right_join(italy_map,tmp2_plot, by = "region") %>% 
+  ggplot()+
+  geom_sf(aes(fill = hospitalized_with_symptoms_per1000, key = region))+ 
+  scale_fill_distiller(name = "Ospedalizzati per 1000 abitanti", palette = "Spectral")+
+  theme(legend.position = "top")+ 
+  labs(caption = paste("Data di riferimento:", latest_date_in_dataset))
+
+plotPos_ly <- plotly::ggplotly(plotPos) 
+plotHosp_ly <- plotly::ggplotly(plotHosp)
+
+plotly::subplot(plotPos_ly, plotHosp_ly) %>% plotly::layout(title = "Positivi e ospedalizzati oggi")
+
+
+dir.create("figures/regions epidemiology")
+
+tmp2_all_dates <- right_join(italy_map,tmp2, by = "region", all.y = TRUE)
+data_lists <- lapply(as.character(sort(unique(tmp2_all_dates$date))), function(date) tmp2_all_dates[tmp2_all_dates$date == date,])
+  
+plots_list <- lapply(data_lists, function(df) 
+    df %>%  
+  ggplot(aes(fill = positives_tot_per1000, key = date))+
+  geom_sf(aes(geometry=geometry))+ 
+  scale_fill_distiller(name = "Positivi per 1000 abitanti", palette = "Spectral")+ 
+  theme(legend.position = "top")+ 
+  labs(title = unique(df$date))
+)
+  
+plots_list[[length(plots_list)]]
+
+```
+
+### create a gif with the output plots (takes hours)
+
+```{r}
+library(magick)
+imgs <- list.files("figures/regions epidemiology/", pattern = "*.png", full.names = TRUE)
+
+img_list <- lapply(imgs, image_read)
+
+## join the images together
+img_joined <- image_join(img_list)
+
+## animate at 2 frames per second
+img_animated <- image_animate(img_joined, fps = 2)
+
+## view animated image
+img_animated
+
+## save to disk
+image_write(image = img_animated,
+            path = "figures/regions epidemiology/00_PositivesPer1000_Region.gif")
+
+```
+
+# ======================
+# == HIC SUNT LEONES ===
+# ======================
+
+```{r}
+
+ggplot(tmp2_all_dates %>% mutate(date_numeric = as.numeric(date)), aes(fill = positives_tot_per1000, key = date))+
+    geom_sf(aes(geometry=geometry))+ 
+    scale_fill_distiller(name = "Positivi per 1000 abitanti", palette = "Spectral")+ 
+    theme(legend.position = "top")+ 
+    gganimate::transition_time(date)+
+    labs(title = "date: {frame_time}")
+
+```
+
+
+## NEW weekly deaths over NEW weekly cases
+
+```{r}
+
+theme_set(theme_light())
+# calculate mean over the whole pandemic period
+mean_deaths_per_thousand_cases <- mean(italy_covid_weekly$nuove_morti_sett/italy_covid_weekly$nuovi_casi_sett*1000)
+
+# do the plot
+italy_covid_weekly %>% 
+  ggplot(aes(x = n_settimana_da_inizio_pandemia, y = nuove_morti_sett/nuovi_casi_sett*1000))+ 
+  geom_line(aes(group= 1))+
+  geom_hline(yintercept = mean_deaths_per_thousand_cases, lty = "dashed", color = "red")+
+  geom_text(aes(x = quantile(italy_covid_weekly$n_settimana_da_inizio_pandemia, 0.75), y = mean_deaths_per_thousand_cases+6, label= paste("media su tutto il periodo =", round(mean_deaths_per_thousand_cases, 1))), color = "red") +
+  geom_vline(xintercept = 26, color = "darkgray")+
+  geom_text(aes(x = 24, y = 125, label = "17-23 agosto 2020"), angle = 90, color = "darkgray")+
+
+  geom_vline(xintercept = 41, color = "darkgray")+
+  geom_text(aes(x = 39, y = 125, label = "gennaio 2021, iniziano i vaccini"), angle = 90, color = "darkgray")+
+  
+  geom_vline(xintercept = 75, color = "darkgray")+
+  geom_text(aes(x = 73, y = 125, label = "fine luglio 2021, popolazione coperta al 55%"), angle = 90, color = "darkgray")+
+  
+  xlab("Numero settimana da inizio pandemia")+
+  ylab("nuovi morti/nuovi casi x 1000")
+```
+## 
+
+```{r}
+
+library(ggpubr)
+
+ggarrange(
+  ggplot(italy_covid, aes(x = factor(n_settimana_da_inizio_pandemia), y = nuovi_positivi))+ 
+    geom_boxplot() + 
+    xlab("N° settimana") + 
+    ylab("Positivi nuovi") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)),
+  ggplot(italy_covid, aes(x = factor(n_settimana_da_inizio_pandemia), y = nuovi_deceduti))+ 
+    geom_boxplot()+
+    xlab("N° settimana")+ 
+    ylab("Deceduti nuovi")+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)), 
+  ncol = 1, nrow = 2
+)
+
+```
+
+
+## Maxima and minima peaks PER WEEK
+### New positives
+```{r}
+italy_covid_weekly <- italy_covid %>% group_by(n_settimana_da_inizio_pandemia) %>% summarise(nuovi_casi_sett = sum(nuovi_positivi)) %>% distinct() 
+
+
+tmp <- inflect(italy_covid_weekly$nuovi_casi_sett)
+indices_to_plot_geom_txt_max <- seq(4, nrow(italy_covid_weekly[tmp$maxima,] %>% merge(., italy_covid, by = "n_settimana_da_inizio_pandemia", all.x = TRUE)), 7)
+indices_to_plot_geom_txt_min <- seq(4, nrow(italy_covid_weekly[tmp$minima,] %>% merge(., italy_covid, by = "n_settimana_da_inizio_pandemia", all.x = TRUE)), 7)
+
+max_min_plots_positives <- ggplot()+ 
+  geom_point(data = italy_covid_weekly, aes(x = n_settimana_da_inizio_pandemia, y = nuovi_casi_sett))+
+  geom_point(data = italy_covid_weekly[tmp$maxima,], aes(x = n_settimana_da_inizio_pandemia, y = nuovi_casi_sett), color = "red")+
+  geom_point(data = italy_covid_weekly[tmp$minima,], aes(x = n_settimana_da_inizio_pandemia, y = nuovi_casi_sett), color = "blue")+
+  geom_vline(xintercept = italy_covid_weekly[tmp$maxima,]$n_settimana_da_inizio_pandemia, color = "red", lty = "dashed", alpha = 0.5)+
+  geom_vline(xintercept = italy_covid_weekly[tmp$minima,]$n_settimana_da_inizio_pandemia, color = "blue", lty = "dashed", alpha = 0.5)+
+ggrepel::geom_text_repel(data = merge(italy_covid_weekly[tmp$minima,], italy_covid, by = "n_settimana_da_inizio_pandemia", all.x = TRUE)[indices_to_plot_geom_txt_min,], mapping = aes(x = n_settimana_da_inizio_pandemia, y = nuovi_casi_sett.x, label = data), color = "blue", force_pull = 5,max.time = 10, max.iter = 200000)+
+  ggrepel::geom_text_repel(data = merge(italy_covid_weekly[tmp$maxima,], italy_covid, by = "n_settimana_da_inizio_pandemia", all.x = TRUE)[indices_to_plot_geom_txt_max,], mapping = aes(x = n_settimana_da_inizio_pandemia, y = nuovi_casi_sett.x, label = data), color = "red", force_pull = 5,max.time = 10, max.iter = 200000)+
+  xlim(c(0, max(italy_covid_weekly$n_settimana_da_inizio_pandemia)))
+
+
+plotly::ggplotly((max_min_plots_positives+ ggtitle("Nuovi Positivi")))
+
+```
+
+### new_deaths
+
+```{r}
+italy_covid_weekly <- italy_covid %>% group_by(n_settimana_da_inizio_pandemia) %>% summarise(nuovi_morti_sett = sum(nuovi_deceduti)) %>% distinct() 
+
+
+tmp <- inflect(italy_covid_weekly$nuovi_morti_sett)
+indices_to_plot_geom_txt_max <- seq(4, nrow(italy_covid_weekly[tmp$maxima,] %>% merge(., italy_covid, by = "n_settimana_da_inizio_pandemia", all.x = TRUE)), 7)
+indices_to_plot_geom_txt_min <- seq(4, nrow(italy_covid_weekly[tmp$minima,] %>% merge(., italy_covid, by = "n_settimana_da_inizio_pandemia", all.x = TRUE)), 7)
+
+max_min_plots_deaths <- ggplot()+ 
+  geom_point(data = italy_covid_weekly, aes(x = n_settimana_da_inizio_pandemia, y = nuovi_morti_sett))+
+  geom_point(data = italy_covid_weekly[tmp$maxima,], aes(x = n_settimana_da_inizio_pandemia, y = nuovi_morti_sett), color = "red")+
+  geom_point(data = italy_covid_weekly[tmp$minima,], aes(x = n_settimana_da_inizio_pandemia, y = nuovi_morti_sett), color = "blue")+
+  geom_vline(xintercept = italy_covid_weekly[tmp$maxima,]$n_settimana_da_inizio_pandemia, color = "red", lty = "dashed", alpha = 0.5)+
+  geom_vline(xintercept = italy_covid_weekly[tmp$minima,]$n_settimana_da_inizio_pandemia, color = "blue", lty = "dashed", alpha = 0.5)+
+ggrepel::geom_text_repel(data = merge(italy_covid_weekly[tmp$minima,], italy_covid, by = "n_settimana_da_inizio_pandemia", all.x = TRUE)[indices_to_plot_geom_txt_min,], mapping = aes(x = n_settimana_da_inizio_pandemia, y = nuovi_morti_sett, label = data), color = "blue", force_pull = 5, max.time = 10, max.iter = 200000)+
+  ggrepel::geom_text_repel(data = merge(italy_covid_weekly[tmp$maxima,], italy_covid, by = "n_settimana_da_inizio_pandemia", all.x = TRUE)[indices_to_plot_geom_txt_max,], mapping = aes(x = n_settimana_da_inizio_pandemia, y = nuovi_morti_sett, label = data), color = "red", force_pull = 5, max.time = 10, max.iter = 200000)+
+  xlim(c(0, max(italy_covid_weekly$n_settimana_da_inizio_pandemia)))
+
+(max_min_plots_deaths + ggtitle("Nuovi Morti")) %>% plotly::ggplotly()
+```
+
+```{r}
+ggsave(plot = ggarrange(max_min_plots_positives,max_min_plots_deaths, nrow = 2, ncol = 1), filename = "figures/x=week, y= cases or deaths/weekly cases and deaths, highlight local max_min.pdf", height = 12, width = 16)
+```
+
+## plot list: total deaths vs total cases for each country
+```{r, warning=FALSE, message=FALSE}
+covid_cases_countries_list <- split.data.frame(covid_epidemiology_international, f = covid_epidemiology_international$location)
+
+theme_set(theme_light())
+plotlist <- lapply(covid_cases_countries_list, function(d) ggplot(data = d, aes(total_cases, total_deaths))+ geom_point() + ggtitle(unique(as.character(d$location))))
+dir.create("figures/x = cases,y = deaths/")
+ggpubr::ggexport(plotlist = plotlist, filename = "figures/x = cases,y = deaths/deaths vs cases for each country.pdf")
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+plotlist <- lapply(covid_cases_countries_list, function(d) ggplot(data = d, aes(date, total_deaths/total_cases*100))+ geom_point()+ ylab("% deaths over cases") + ggtitle(unique(as.character(d$location))) + geom_text(data = d[nrow(d),], mapping = aes(x = date-20, total_deaths/total_cases*100 +  total_deaths/total_cases*10, label = paste0("latest value:\n", round(total_deaths/total_cases*100,2), "%"))))
+dir.create("figures/x=date, y= cases or deaths/")
+ggpubr::ggexport(plotlist = plotlist, filename = "figures/x=date, y= cases or deaths/deaths_over_cases_per100 every day.pdf")
+
+```
+
+## Regression new_deaths~new_cases
+
+```{r}
+# install.packages("lme4")
+# library(lme4)
+# nice tutorial on regression and modeling:
+# https://ourcodingclub.github.io/tutorials/mixed-models/#three
+
+covid_cases_countries_list <- split.data.frame(covid_epidemiology_international, f = covid_epidemiology_international$location)
+
+lm_new_cases_icu <- lm(formula = new_deaths~new_cases + month + icu_patients, data = covid_cases_countries_list$Italy)
+
+
+# lm_complex <- lm(formula = new_deaths~new_cases + month*year, data = filter(covid_epidemiology_international, location == "Italy")) 
+# lm_simple <- lm(formula = new_deaths~new_cases, data = filter(covid_epidemiology_international, location == "Italy")) 
+# 
+# colnames(covid_epidemiology_international)
+# summary(lm_simple)
+
+```
+ 
+## covid new cases per date
+```{r}
+pdf("figures/x=date, y= cases or deaths/cases per 1000 inhabitants in each region.pdf", height = 8, width = 12)
+ggplot(italy_regions_epidemiology, aes(x = date, y = positives_new/region_inhabitants*1000))+ geom_point() + facet_wrap(~region, ncol = 5, nrow = 5, scales = "free")
+dev.off()
+
+
+pdf("figures/x=date, y= cases or deaths/ICU total occupied.pdf", height = 8, width = 12)
+ggplot(italy_regions_epidemiology, aes(x = date, y = hospitalized_intensive_care_all))+ geom_point() + facet_wrap(~region, ncol = 5, nrow = 5, scales = "free")
+dev.off()
+
+open.plot.directory("figures/x=date, y= cases or deaths/cases per 1000 inhabitants in each region.pdf")
+
+```
+
+## Covid ICU each region
+
+```{r}
+filter(italy_regions_epidemiology, date == tail(sort(italy_regions_epidemiology$date),1)) %>% 
+  ggplot(aes(x = reorder(region, - hospitalized_intensive_care_all/region_inhabitants), y = log(hospitalized_intensive_care_all/region_inhabitants*100000)))+
+  geom_bar(stat = "identity")+ 
+  xlab("")+
+  ylab("proportion")+
+  ggtitle("ICU patients per 100k inhabitants")+
+  theme_light()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+## Plot for each region x = date, y = positives, color = % vaccinated
+
+```{r}
+vaccinated_per_region <- read_csv("https://raw.githubusercontent.com/italia/covid19-opendata-vaccini/master/dati/somministrazioni-vaccini-latest.csv") %>% 
+  group_by(nome_area, data_somministrazione) %>% 
+  summarise(nome_area = nome_area,
+            data_somministrazione = data_somministrazione,
+            seconda_dose = sum(seconda_dose)) %>% 
+  distinct() %>% 
+  group_by(nome_area) %>% 
+  summarise(nome_area = nome_area,
+            data_somministrazione = data_somministrazione,
+            seconda_dose = seconda_dose,
+            seconda_dose_cumsum = cumsum(seconda_dose)) %>% 
+  ungroup()
+
+colnames(vaccinated_per_region) <- c("region", "date", "second_doses_new", "second_doses_total")
+
+View(merge(italy_regions_epidemiology, vaccinated_per_region, by = c("date", "region")))
+
+
+veneto <- filter(merge(italy_regions_epidemiology, vaccinated_per_region, by = c("date", "region")), region =="Veneto")
+
+
+ggplot(veneto)+ 
+  geom_point(mapping = aes(x = date, y = hospitalized_intensive_care_all, color = second_doses_total/region_inhabitants*100, color = second_doses_total/region_inhabitants*100))+
+  geom_point(mapping = aes(x = date, y = positives_tot/100), shape = "diamond")+
+scale_y_continuous(
+    
+    # Features of the first axis
+    name = "ICU patients total",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*100, name="Positives total")
+  ) +
+  labs(colour = "% Completed vaccinations")
+
+```
+
+### incidenza settimanale casi
+
+```{r}
+
+Sys.setlocale("LC_TIME", "English")
+
+latest_date <- sort(italy_regions_epidemiology$date, decreasing = TRUE)[1] 
+day <- weekdays(latest_date)
+
+weekly_incidence <- italy_regions_epidemiology %>% 
+  group_by(region, week_since_pandemic_began) %>% 
+  summarise(weekly_positives = sum(positives_new),
+            region_inhabitants = region_inhabitants,
+            date = as.Date(date)) %>% 
+  mutate(weekly_incidence_per_100000 = weekly_positives/region_inhabitants*100000) %>% 
+    dplyr::distinct()  # to remove duplicated rows
+  
+
+plotlist <- lapply(unique(weekly_incidence$region), function(r) 
+ggplot(filter(weekly_incidence, region == r), aes(x = week_since_pandemic_began, y = weekly_incidence_per_100000))+ 
+  ggtitle (r) + 
+  geom_hline(yintercept = 50, lty = "dashed", color = "red")+
+  geom_line(aes(group = 1), color = "darkgray")+
+  geom_point(color = "grey45")+
+  xlab("numero di settimana da inizio pandemia") +
+  ylab ("incidenza settimanale per 100,000 abitanti")+
+  labs(subtitle = paste("Data più recente disponibile:", day, latest_date))+
+  theme(plot.title = element_text( size = 18,face = "bold"),
+        plot.subtitle = element_text(color = "gray"))
+)
+
+
+dir.create("figures/x= week, y = incidence per 100000/")
+
+pdf(paste("figures/x= week, y = incidence per 100000/", latest_date, "__regioni_incid_sett.pdf", sep = ""), height = 7, width = 8)
+sapply(plotlist, print)
+dev.off()
+
+open.plot.directory(paste("figures/x= week, y = incidence per 100000/", latest_date, "__regioni_incid_sett.pdf", sep = ""))
+```
+
+# Vaccines data
+```{r}
+dir.create("data/vaccines/injections/")
+dir.create("data/vaccines/shippings/")
+
+download.file("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/vaccinations/vaccinations.csv",destfile = "data/vaccines/injections/vaccines_data_OurWorldInData.csv")
+download.file("https://raw.githubusercontent.com/italia/covid19-opendata-vaccini/master/dati/consegne-vaccini-latest.csv", destfile = "data/vaccines/shippings/vaccine shippings italy.csv")
+download.file("https://raw.githubusercontent.com/italia/covid19-opendata-vaccini/master/dati/somministrazioni-vaccini-latest.csv", destfile = "data/vaccines/vaccines_italian_data.csv")
+
+vaccines_data_italy <- read.csv("data/vaccines/vaccines_italian_data.csv") %>% 
+  mutate(data = as.Date(data_somministrazione)) %>% 
+  select(-data_somministrazione)
+
+vaccines_data_owid <- read.csv("data/vaccines/injections/vaccines_data_OurWorldInData.csv") %>% 
+  mutate(data = as.Date(date)) %>% 
+  select(-date)
+
+```
+
+```{r}
+colnames(vaccines_data_italy)
+
+vaccines_data_italy %>% 
+  group_split(area, .keep = TRUE) %>% 
+  lapply(function(df) group_by(df) %>% 
+  summarise(data = data, 
+            prima_dose_cumsum = cumsum(prima_dose),
+            seconda_dose_cumsum = cumsum(seconda_dose))) %>%
+  bind_rows() %>% 
+  group_by(data) %>% 
+    summarise(prima_dose_cumsum = sum(prima_dose_cumsum),
+              seconda_dose_cumsum = sum(seconda_dose_cumsum)) %>% 
+ungroup() %>% 
+ggplot(aes(x = data, y = seconda_dose_cumsum))+ 
+  geom_bar(stat="identity")#+
+  facet_grid(rows = vars(area))
+
+
+```
+
+## Vaccines data OWID
+
+```{r}
+vaccines_data_owid <- read.csv("data/vaccines/injections/vaccines_data_OurWorldInData.csv") %>% 
+  mutate(date = as.Date(date))
+
+latest_date_vaccines_owid <- sort(vaccines_data_owid$date) %>% tail(1)
+
+library(kableExtra)
+
+filter(vaccines_data_owid, date == latest_date_vaccines_owid) %>% 
+  arrange(-people_fully_vaccinated_per_hundred) %>% 
+  head(10) %>% 
+  select(date, location, people_fully_vaccinated_per_hundred) %>% 
+  kbl(digits = 1, caption = paste0("Top 10 best performing countries in terms of finished vaccinations per hundred people. Latest data update: ", latest_date_vaccines_owid)) %>% 
+  kable_styling(bootstrap_options = "striped")
+
+#what is their Rt mean in the last month? mean + sd or 95% CI
+
+
+```
+
+# Rt relation to percent of people totally vaccinated vaccinations 
+
+## Italy
+
+```{r}
+vaccines_administr_italy <- vaccines_data_owid %>% 
+  filter(location == "Italy" & !is.na(people_fully_vaccinated_per_hundred)) %>%
+  select(date, people_fully_vaccinated_per_hundred) %>% 
+  mutate(date = as.Date(date))
+
+reprod.rates_italy <- 
+  covid_epidemiology_international %>% 
+  filter(location == "Italy" & !is.na(reproduction_rate)) %>% 
+  select(date, reproduction_rate) %>% 
+  mutate(date = as.Date(date))
+
+# plot 1
+merge(vaccines_administr_italy, reprod.rates_italy, by = "date") %>% 
+  mutate(season = date_to_Season(date)) %>% 
+  ggscatter(data = .,
+            x = "people_fully_vaccinated_per_hundred",
+            y = "reproduction_rate",
+            color = "season",
+            palette = "jco")+
+  xlab(" People fully vaccinated (%)")+
+  ylab("Rt estimate")+
+  theme_light()
+
+# plot 2
+merge(vaccines_administr_italy, reprod.rates_italy, by = "date") %>% 
+  mutate(season = date_to_Season(date)) %>% 
+  ggscatter(data = .,
+            x = "date",
+            y = "reproduction_rate",
+            color = "people_fully_vaccinated_per_hundred",
+            )+
+  xlab("date")+
+  ylab(" People fully vaccinated (%)")+
+  theme_light()
+```
+
+I can't see a clear relation between Rt and vaccinations. not even season-wise this seems to be the case.
+
+```{r}
+merge(vaccines_administr_italy, reprod.rates_italy, by = "date") %>% 
+  mutate(season = date_to_Season(date)) %>% 
+  ggboxplot(data = .,
+            x = "season",
+            y = "reproduction_rate",
+            title = latest_date_owid_dataset
+            )+
+  theme_light()
+```
+
+
+# Varinats data
+```{r}
+variants_data <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/variants/covid-variants.csv")
+
+variants_data %>% filter(location == "Italy") %>% 
+  ggplot(aes(x = date, y = perc_sequences, color = variant))+ 
+  geom_point()+ 
+  geom_line(aes(group = variant))+ 
+  theme(axis.text.x = element_text(angle = 90))
+
+```
+
+# Impact of vaccinations in relation to new cases
+
+```{r}
+international_covid_autumn_winter2021 <- covid_epidemiology_international %>% 
+  filter(lubridate::year(date) == 2021) %>% 
+  filter(lubridate::month(date) %in% 10:12)
+
+tmp <- international_covid_autumn_winter2021 %>% 
+  mutate(week = lubridate::week(date)) %>% 
+  group_by(location, week) %>% 
+  summarise(new_weekly_cases_per_million = sum(new_cases_per_million),
+            weekly_icu_admissions = sum(weekly_icu_admissions)) %>% 
+  ungroup()
+
+hist(international_covid_autumn_winter2021$new_cases_per_million)
+
+```
+
+
+
+# CODE TESTING AREA
+
+## andamento tamponi total
+
+```{r, dependson=7}
+tamponi_nuovi <- c(italy_covid$tamponi[1], diff(italy_covid$tamponi))
+italy_covid$tamponi_nuovi <- tamponi_nuovi
+italy_covid$nome_giorno <- weekdays(as.Date(italy_covid$data))
+
+ggpubr::ggarrange(ggplot()+
+  geom_point(data = italy_covid, mapping = aes(x = as.Date(data), y = tamponi))+ theme_light(),
+ggplot()+
+  geom_line(data = filter(italy_covid, nome_giorno != "domenica"), mapping = aes(x = as.Date(data), y = tamponi_nuovi))+
+  theme_light(),
+ncol=1, nrow = 2
+)
+
+
+
+```
+
+## casi totali al minimo
+```{r}
+
+tmp <- select(italy_covid, data, totale_positivi) %>% 
+  arrange(totale_positivi) %>% 
+  head(100)
+
+ggplot() + 
+  geom_point(data = italy_covid, mapping = aes(x = data, y = nuovi_positivi)) + 
+  geom_point(data = italy_covid, mapping = aes(x = data, y = totale_positivi/20), colour = "red")
+```
+
+## Rapporto totali contagiati/totali ricoverati o/e totali morti
+
+```{r}
+italy_covid %>% colnames()
+
+ricoverati_su_positivi_nuovi <- ggplot(italy_covid, aes(x = as.Date(data),y = ingressi_terapia_intensiva/nuovi_positivi))+
+  geom_point()+ 
+  ggtitle("nuovi ricov/nuovi pos")
+
+ricoverati_su_positivi_tot <- ggplot(italy_covid, aes(x = as.Date(data),y = terapia_intensiva/totale_positivi_attualmente))+
+  geom_point()+ 
+  ggtitle("nuovi ricov/tot pos")
+
+ggarrange(ricoverati_su_positivi_nuovi,ricoverati_su_positivi_tot)
+
+
+```
+
+```{r}
+pdf("figures/tmp.pdf", height = 20, width = 20)
+pairs(italy_covid[,sapply(italy_covid, class) %in% c("integer", "numeric")])
+dev.off()
+```
+## predict number of deaths with random forest
+```{r}
+library(randomForest)
+italy_covid_rf_dataset <- mutate(italy_covid, 
+                                 mese_anno = paste(mese, anno, sep = "_"))
+rf_first_attempt <- randomForest::randomForest(formula = nuovi_deceduti ~ nuovi_positivi + terapia_intensiva + totale_ospedalizzati + mese_anno, importance= TRUE, data = italy_covid_rf_dataset)
+
+summary(rf_first_attempt)
+
+randomForest::partialPlot(x = rf_first_attempt, italy_covid_rf_dataset, totale_ospedalizzati)
+```
+
+Obiettivo più ambizioso sarebbe di prevedere totale morti alla fine di ogni ondata partendo dalla velocità di crescita della curva. per questo potremmo interrogare la variazione totale di positivi, e fargli predire, all'inizio di una curva in crescita, la somma dei morti dopo due settimane/un mese.
+
+## deaths relative to median values
+
+```{r}
+tmp <- filter(covid_epidemiology_international, date == as.Date(latest_date_owid_dataset)-1)
+
+plotly::ggplotly(ggplot(tmp, aes(x = median_age , y = sqrt(total_deaths_per_million), color = log10(population_density), label = location))+ geom_point() + geom_smooth(method = "lm"))
+
+```
+
+# Impact of vaccines on new cases, ICU and deat patients
+
+Have vaccines actually improved something since the implementation? Let's have a look on the impact of the % of single vaccinated and fully vaccinated on the number of cases
+
+```{r}
+
+italy_epid_vaccine <- merge(italy_covid, filter(vaccines_data_owid, location == "Italy"), by = "data")
+
+```
+
+# gganimate region contagions
+
+```{r}
+italy_regions_epidemiology <- read.csv("data/epidemiology/italy/regions/covid_REGIONS_data_clean.csv", row.names = 1) %>% 
+  mutate(date = as.Date(date))
+
+# 1. format region names to please the mapIT package, understanding that south tyrol and trentino are one single region, while covid epidemiology data disagrees
+italy_regions_epidemiology$region[italy_regions_epidemiology$region == "Friuli Venezia Giulia"] <- "Friuli-Venezia Giulia"
+
+tmp <- italy_regions_epidemiology %>% 
+  select(region, positives_tot, hospitalized_with_symptoms, date, region_inhabitants)
+
+tmp$region[tmp$region == "P.A. Trento"] <- "Trentino-Alto Adige"
+tmp$region[tmp$region == "P.A. Bolzano"] <- "Trentino-Alto Adige"
+
+# now find a way to summarise trentino + alto adige into Trentino-Alto Adige
+tmp2 <- tmp %>% group_by(region, date) %>% 
+  summarise_all(sum) %>% 
+  mutate(positives_tot_per1000 = positives_tot/region_inhabitants*1000,
+         hospitalized_with_symptoms_per1000 = hospitalized_with_symptoms/region_inhabitants*1000)
+
+# get only latest date of the dataset for plotting
+latest_date_in_dataset <- sort(tmp2$date, decreasing = TRUE)[1]
+tmp2_plot <- filter(tmp2, date == latest_date_in_dataset)
+
+# now the actual region plot, to the latest date, in the future, a gif could be cool, or even better a selectable bar for date, but that would require a shiny app i think
+
+library(rnaturalearth)
+
+italy_map <- ne_states(country = "italy", returnclass = "sf") %>% 
+  group_by(region) %>% 
+  summarise() %>% 
+  sf::st_cast("MULTIPOLYGON") # this line is useful to make plotly plots
+
+# plotly::plot_ly(italy_map, split = ~region)
+
+italy_map$region[italy_map$region == "Sicily"] <- "Sicilia"
+italy_map$region[italy_map$region == "Apulia"] <- "Puglia"
+
+
+plotPos <- right_join(tmp2_plot,italy_map, by = "region", all.x = TRUE)  %>% 
+  ggplot(aes(fill = positives_tot_per1000, key = region, geometry = geometry))+
+  geom_sf()+ 
+  scale_fill_distiller(name = "Positivi per 1000 abitanti", palette = "Spectral")+ 
+  theme(legend.position = "top")
+
+# MORE THAN ONE DATE; try to plot this
+
+tmp2_all_dates <- right_join(tmp2, italy_map, by = "region", all.x = TRUE) 
+
+
+dir.create("figures/tmp_regions_positives")
+
+{pdf(file = "figures/tmp_regions_positives/positivesPer1000.pdf", 
+      height = 6, 
+      width = 7)
+  par(mfrow = c(1,1))
+for(date in as.character(sort(unique(tmp2_all_dates$date)))){
+  tmp <- tmp2_all_dates[tmp2_all_dates$date == date,]
+  
+  print(tmp %>%  
+  ggplot(aes(fill = positives_tot_per1000, key = date))+
+  geom_sf(aes(geometry=geometry))+ 
+  scale_fill_distiller(name = "Positivi per 1000 abitanti", palette = "Spectral")+ 
+  theme(legend.position = "top")+ 
+  labs(title = date)
+)
+}
+dev.off()
+}
+
+open.plot.directory("figures/tmp_regions_positives/positivesPer1000.pdf")
+
+```
+
