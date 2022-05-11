@@ -13,7 +13,7 @@ covid_data_italy_whole <- covid_data_raw %>%
   mutate(anno = factor(lubridate::year(data))) %>%
   mutate(mese = lubridate::month(data, label = TRUE, abbr = FALSE)) %>%
   mutate(giorno = factor(lubridate::day(data))) %>%
-  mutate(stagione = date_to_Season(data)) %>%
+  mutate(stagione = date_to_Season(date = data)) %>%
   mutate(settimana = as.Date(cut(data, "weeks"))) %>% 
   mutate(giorno_settimana = weekdays(data)) %>% 
   dplyr::rename(totale_positivi_attualmente = totale_positivi,

@@ -13,11 +13,8 @@ output:
 
 ```{r, message=FALSE}
 
-#library(magrittr)
-library(ggpubr)
-theme_set(theme_light())
-source("../personal_R_functions/my_personal_functions.R")
-
+# source("../personal_R_functions/my_personal_functions.R")
+library(gautils2)
 # functions
 # inflect: finds minima and maxima of a numeric vector, and return positions of minima and maxima in two separate vectors inside a list
 inflect <- function(x, threshold = 1){
@@ -27,7 +24,9 @@ inflect <- function(x, threshold = 1){
   list(minima = which(apply(a, 1, min) == a[,1]), maxima = which(apply(a, 1, max) == a[,1]))
 }
 
-library(tidyverse)
+library(magrittr)
+library(ggpubr)
+theme_set(theme_light())
 
 ```
 # Download and tidy up epidemiology data
@@ -67,16 +66,16 @@ covid_epidemiology_international <- readr::read_csv(file = list.files(path = "da
 
 
 ```
-## top 20 epidemiologically active countries
+## top 30 epidemiologically active countries
 
-```{r}
+```{r, fig.height = 8, fig.width=10}
 
 latest_date <- max(covid_epidemiology_international$date)
 
 covid_epidemiology_international %>% 
   filter(date == max(date) & !is.na(continent)) %>% # get only latest date, and the continents in the "location" column need to be removed. this is easy, we can simply remove rows where "location" is NA.
   arrange(-new_cases_per_million) %>% 
-  head(50) %>% 
+  head(30) %>% 
   #filter(iso_code =="ITA") %>% 
   select(date, new_cases_per_million, location, continent) %>% 
   ggplot(aes(y = reorder(location, new_cases_per_million), x = new_cases_per_million, fill = continent)) + 
@@ -100,7 +99,7 @@ latest_date <- max(covid_epidemiology_international$date)
 tmp <- covid_epidemiology_international %>% 
   filter(date == max(date) & !is.na(continent)) %>% # get only latest date, and the continents in the "location" column need to be removed. this is easy, we can simply remove rows where "location" is NA.
   arrange(-total_cases_per_million) %>% 
-  head(50) %>% 
+  head(30) %>% 
   ggplot(aes(y = reorder(location, total_cases_per_million), x = total_cases_per_million, fill = continent)) + 
   geom_bar(stat = "identity") + 
   theme_light()+
@@ -122,7 +121,7 @@ latest_date <- max(covid_epidemiology_international$date)
 covid_epidemiology_international %>% 
   filter(date == max(date) & !is.na(continent)) %>% # get only latest date, and the continents in the "location" column need to be removed. this is easy, we can simply remove rows where "location" is NA.
   arrange(-total_deaths_per_million) %>% 
-  head(50) %>% 
+  head(30) %>% 
   ggplot(aes(y = reorder(location, total_deaths_per_million), x = total_deaths_per_million, fill = continent)) + 
   geom_bar(stat = "identity") + 
   theme_light()+
@@ -133,16 +132,6 @@ covid_epidemiology_international %>%
     scale_fill_manual("Continent", values = ggsci::pal_jco()(6))
 ```
 
-
-
-# Importance of day of week in estimating values
-
-```{r}
-ggpubr::ggarrange(ggplot(covid_data_italy_whole, aes(data, tamponi_nuovi, colour = giorno_sett))+ geom_line(),
-                  ggplot(covid_data_italy_whole, aes(data, nuovi_positivi, colour = giorno_sett))+ geom_line(),
-                  common.legend = TRUE, 
-                  nrow = 2, ncol = 1)
-```
 
 ## International table
 
